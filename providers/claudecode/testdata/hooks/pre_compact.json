@@ -1,0 +1,6 @@
+{
+  "session_id": "a1b2c3d4-0000-4444-8888-abcdef123456",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-myproj/a1b2c3d4-0000-4444-8888-abcdef123456.jsonl",
+  "cwd": "/home/dev/myproj",
+  "hook_event_name": "PreCompact"
+}

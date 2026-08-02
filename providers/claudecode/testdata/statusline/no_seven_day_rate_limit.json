@@ -1,0 +1,10 @@
+{
+  "session_id": "a1b2c3d4-0000-4444-8888-abcdef123456",
+  "prompt_id": "p-0002",
+  "model": { "display_name": "Claude Sonnet 4.5" },
+  "context_window": { "used_percentage": 10.0, "total_input_tokens": 20000, "context_window_size": 200000 },
+  "cost": { "total_cost_usd": 0.05, "total_duration_ms": 5000 },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 5.0, "resets_at": 1785787200 }
+  }
+}
