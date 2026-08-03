@@ -64,6 +64,16 @@ type MultiplexerInfo struct {
 	Session string `json:"session,omitempty"`
 	Window  string `json:"window,omitempty"`
 	Pane    string `json:"pane,omitempty"`
+
+	// Stable tmux identifiers ($session_id/@window_id/%pane_id), captured
+	// alongside Session/Window/Pane above. Unlike session/window names and
+	// window/pane indices, these do not change when windows are reordered
+	// or renamed, so external tooling (e.g. tmux-asc-binder) should key off
+	// these rather than Session/Window/Pane when targeting a specific
+	// pane/window/session with `tmux set-option -t`.
+	SessionID string `json:"session_id,omitempty"`
+	WindowID  string `json:"window_id,omitempty"`
+	PaneID    string `json:"pane_id,omitempty"`
 }
 
 // IsStopped reports whether the session has reached a terminal state.

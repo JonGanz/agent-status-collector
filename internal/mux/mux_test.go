@@ -26,12 +26,18 @@ func TestDetect_Tmux_UsesInjectedQuerier(t *testing.T) {
 
 	orig := tmuxQuerier
 	tmuxQuerier = func() Info {
-		return Info{Type: "tmux", Session: "main", Window: "2", Pane: "0"}
+		return Info{
+			Type: "tmux", Session: "main", Window: "2", Pane: "0",
+			SessionID: "$1", WindowID: "@2", PaneID: "%3",
+		}
 	}
 	defer func() { tmuxQuerier = orig }()
 
 	got := Detect()
-	want := Info{Type: "tmux", Session: "main", Window: "2", Pane: "0"}
+	want := Info{
+		Type: "tmux", Session: "main", Window: "2", Pane: "0",
+		SessionID: "$1", WindowID: "@2", PaneID: "%3",
+	}
 	if got != want {
 		t.Fatalf("Detect() = %+v, want %+v", got, want)
 	}
