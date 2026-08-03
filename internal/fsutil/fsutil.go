@@ -1,14 +1,17 @@
-package store
+// Package fsutil provides small filesystem helpers shared across packages
+// that need to write files without ever leaving a torn/partial file behind.
+package fsutil
 
 import (
 	"os"
 	"path/filepath"
 )
 
-// writeAtomic writes data to path by creating a temp file in the same
+// WriteAtomic writes data to path by creating a temp file in the same
 // directory (so the rename is guaranteed atomic on the same filesystem),
-// syncing, then renaming over the target.
-func writeAtomic(path string, data []byte, perm os.FileMode) error {
+// syncing, then renaming over the target. Parent directories are created as
+// needed.
+func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

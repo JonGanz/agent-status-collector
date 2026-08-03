@@ -35,13 +35,43 @@ func (m *memStore) LoadAll() ([]status.Status, error) {
 	return out, nil
 }
 
-func newTestProvider(t *testing.T) (*Provider, *memStore) {
+// memRateLimitStore is an in-memory provider.RateLimitStore for isolated
+// adapter tests.
+type memRateLimitStore struct {
+	windows     map[string][]status.RateLimitWindow
+	lastUpdated map[string]time.Time
+}
+
+func newMemRateLimitStore() *memRateLimitStore {
+	return &memRateLimitStore{
+		windows:     map[string][]status.RateLimitWindow{},
+		lastUpdated: map[string]time.Time{},
+	}
+}
+
+func (m *memRateLimitStore) SaveRateLimits(providerName string, windows []status.RateLimitWindow, at time.Time) error {
+	m.windows[providerName] = windows
+	m.lastUpdated[providerName] = at
+	return nil
+}
+
+func (m *memRateLimitStore) LoadRateLimits(providerName string) ([]status.RateLimitWindow, time.Time, bool, error) {
+	w, ok := m.windows[providerName]
+	if !ok {
+		return nil, time.Time{}, false, nil
+	}
+	return w, m.lastUpdated[providerName], true, nil
+}
+
+func newTestProvider(t *testing.T) (*Provider, *memStore, *memRateLimitStore) {
 	t.Helper()
 	p := New()
 	ms := newMemStore()
+	rl := newMemRateLimitStore()
 	p.SetStore(ms)
+	p.SetRateLimitStore(rl)
 	p.now = func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	return p, ms
+	return p, ms, rl
 }
 
 const testSessionID = "a1b2c3d4-0000-4444-8888-abcdef123456"
@@ -64,7 +94,7 @@ func TestHandleHook_StateTransitions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.event, func(t *testing.T) {
-			p, ms := newTestProvider(t)
+			p, ms, _ := newTestProvider(t)
 			// Seed an existing active session for events that shouldn't
 			// change state (SubagentStop/PreCompact) or that transition
 			// from active.
@@ -101,7 +131,7 @@ func TestHandleHook_StateTransitions(t *testing.T) {
 }
 
 func TestHandleHook_SubagentStopDoesNotChangeState(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
 
 	payload := testutil.LoadFixture(t, "hooks/subagent_stop.json")
@@ -115,7 +145,7 @@ func TestHandleHook_SubagentStopDoesNotChangeState(t *testing.T) {
 }
 
 func TestHandleHook_SessionStart_CreatesNewRecord(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	payload := testutil.LoadFixture(t, "hooks/session_start.json")
 
 	st, err := p.HandleHook(context.Background(), "SessionStart", bytes.NewReader(payload))
@@ -134,7 +164,7 @@ func TestHandleHook_SessionStart_CreatesNewRecord(t *testing.T) {
 }
 
 func TestHandleHook_UserPromptSubmit_SetsFallbackSummary(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
 
 	payload := testutil.LoadFixture(t, "hooks/user_prompt_submit.json")
@@ -148,7 +178,7 @@ func TestHandleHook_UserPromptSubmit_SetsFallbackSummary(t *testing.T) {
 }
 
 func TestHandleHook_Notification_RecordsMessage(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
 
 	payload := testutil.LoadFixture(t, "hooks/notification.json")
@@ -162,7 +192,7 @@ func TestHandleHook_Notification_RecordsMessage(t *testing.T) {
 }
 
 func TestHandleHook_MissingSessionID_Errors(t *testing.T) {
-	p, _ := newTestProvider(t)
+	p, _, _ := newTestProvider(t)
 	_, err := p.HandleHook(context.Background(), "SessionStart", bytes.NewReader([]byte(`{"hook_event_name":"SessionStart"}`)))
 	if err == nil {
 		t.Fatalf("expected error for missing session_id")

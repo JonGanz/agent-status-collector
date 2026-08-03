@@ -27,6 +27,26 @@ func seedSession(t *testing.T, stateDir string, st status.Status) {
 	}
 }
 
+func seedRateLimits(t *testing.T, stateDir, provider string, windows []status.RateLimitWindow, lastUpdated time.Time) {
+	t.Helper()
+	dir := filepath.Join(stateDir, "rate-limits")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	rec := struct {
+		Provider    string                   `json:"provider"`
+		Windows     []status.RateLimitWindow `json:"windows"`
+		LastUpdated time.Time                `json:"last_updated"`
+	}{Provider: provider, Windows: windows, LastUpdated: lastUpdated}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, provider+".json"), data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
 func runCmd(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
@@ -136,5 +156,63 @@ func TestPrune_DryRun_RespectsStoppedGracePeriod(t *testing.T) {
 	}
 	if out != "" {
 		t.Fatalf("prune --dry-run reported a removal within the grace period:\n%s", out)
+	}
+}
+
+func TestRateLimits_ReadableWithoutFindingASession(t *testing.T) {
+	// Rate limits are account-level, not session-level, so `rate-limits`
+	// must work directly off the aggregate store -- no session needs to
+	// exist at all.
+	stateDir := t.TempDir()
+	now := time.Now().Truncate(time.Second)
+	seedRateLimits(t, stateDir, "claudecode", []status.RateLimitWindow{
+		{Label: "5h", PercentUsed: 12.5},
+		{Label: "7d", PercentUsed: 3.0},
+	}, now)
+
+	out, err := runCmd(t, "rate-limits", "--json", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("rate-limits: %v\n%s", err, out)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(out), &records); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(records) != 1 || records[0]["provider"] != "claudecode" {
+		t.Fatalf("records = %v, want 1 claudecode record", records)
+	}
+}
+
+func TestRateLimits_ProviderFilter(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Now()
+	seedRateLimits(t, stateDir, "claudecode", []status.RateLimitWindow{{Label: "5h", PercentUsed: 1}}, now)
+	seedRateLimits(t, stateDir, "other-provider", []status.RateLimitWindow{{Label: "5h", PercentUsed: 2}}, now)
+
+	out, err := runCmd(t, "rate-limits", "--provider", "claudecode", "--json", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("rate-limits: %v\n%s", err, out)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(out), &records); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(records) != 1 || records[0]["provider"] != "claudecode" {
+		t.Fatalf("records = %v, want only claudecode", records)
+	}
+}
+
+func TestRateLimits_NoneRecorded_EmptyNotError(t *testing.T) {
+	stateDir := t.TempDir()
+	out, err := runCmd(t, "rate-limits", "--json", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("rate-limits: %v\n%s", err, out)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(out), &records); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(records) != 0 {
+		t.Fatalf("records = %v, want empty", records)
 	}
 }

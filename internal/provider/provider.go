@@ -8,6 +8,7 @@ package provider
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/JonGanz/agent-status-collector/internal/status"
 )
@@ -69,4 +70,22 @@ type SessionStore interface {
 // HandleHook.
 type StoreAware interface {
 	SetStore(SessionStore)
+}
+
+// RateLimitStore persists account-level rate limit snapshots, keyed by
+// provider name. Unlike SessionStore, this is not scoped to any individual
+// session: rate limit windows (e.g. Claude's 5h/7d usage) apply to the
+// whole account, so they're queryable directly (`agent-status
+// rate-limits`) without needing to find which session last reported them.
+// internal/ratelimit.Store satisfies this interface.
+type RateLimitStore interface {
+	SaveRateLimits(providerName string, windows []status.RateLimitWindow, at time.Time) error
+	LoadRateLimits(providerName string) (windows []status.RateLimitWindow, lastUpdated time.Time, ok bool, err error)
+}
+
+// RateLimitStoreAware is implemented by providers that report
+// account-level rate limits (not all will). The core calls
+// SetRateLimitStore once, mirroring StoreAware, before calling HandleHook.
+type RateLimitStoreAware interface {
+	SetRateLimitStore(RateLimitStore)
 }

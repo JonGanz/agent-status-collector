@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/JonGanz/agent-status-collector/internal/fsutil"
 	"github.com/JonGanz/agent-status-collector/internal/provider"
 )
 
@@ -148,16 +148,13 @@ func (p *Provider) Setup(dryRun bool) (provider.SetupResult, error) {
 	if err != nil {
 		return result, err
 	}
-	if err := writeFileAtomic(sp, out, 0o600); err != nil {
+	if err := fsutil.WriteAtomic(sp, out, 0o600); err != nil {
 		return result, err
 	}
 
 	// 4. Write the skill file.
 	if skillChanged {
-		if err := os.MkdirAll(filepath.Dir(sk), 0o700); err != nil {
-			return result, err
-		}
-		if err := writeFileAtomic(sk, skillTemplate, 0o600); err != nil {
+		if err := fsutil.WriteAtomic(sk, skillTemplate, 0o600); err != nil {
 			return result, err
 		}
 	}
@@ -183,7 +180,7 @@ printf '%%s' "$input" | agent-status hook claudecode --event=StatusLine >/dev/nu
 printf '%%s' "$input" | %s
 `, statuslineScriptMarker, originalCommand)
 	}
-	return writeFileAtomic(path, []byte(script), 0o700)
+	return fsutil.WriteAtomic(path, []byte(script), 0o700)
 }
 
 func copyFile(src, dst string) error {
@@ -191,29 +188,5 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(dst, data, 0o600)
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return fsutil.WriteAtomic(dst, data, 0o600)
 }

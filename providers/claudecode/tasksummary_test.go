@@ -11,7 +11,7 @@ import (
 )
 
 func TestHandleTaskSummary_BySessionID(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
 
 	body, _ := json.Marshal(map[string]string{"session_id": testSessionID, "summary": "Writing tests"})
@@ -25,7 +25,7 @@ func TestHandleTaskSummary_BySessionID(t *testing.T) {
 }
 
 func TestHandleTaskSummary_FallsBackToCwdMatch(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	now := time.Now()
 	ms.sessions[testSessionID] = status.Status{
 		SessionID:   testSessionID,
@@ -56,7 +56,7 @@ func TestHandleTaskSummary_FallsBackToCwdMatch(t *testing.T) {
 }
 
 func TestHandleTaskSummary_NoMatchingSession_Errors(t *testing.T) {
-	p, _ := newTestProvider(t)
+	p, _, _ := newTestProvider(t)
 	body, _ := json.Marshal(map[string]string{"cwd": "/nowhere", "summary": "x"})
 	_, err := p.HandleHook(context.Background(), "TaskSummary", bytes.NewReader(body))
 	if err == nil {
@@ -65,7 +65,7 @@ func TestHandleTaskSummary_NoMatchingSession_Errors(t *testing.T) {
 }
 
 func TestHandleTaskSummary_MissingSummary_Errors(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
 	body, _ := json.Marshal(map[string]string{"session_id": testSessionID})
 	_, err := p.HandleHook(context.Background(), "TaskSummary", bytes.NewReader(body))
@@ -75,7 +75,7 @@ func TestHandleTaskSummary_MissingSummary_Errors(t *testing.T) {
 }
 
 func TestHandleTaskSummary_IgnoresStoppedSessions(t *testing.T) {
-	p, ms := newTestProvider(t)
+	p, ms, _ := newTestProvider(t)
 	now := time.Now()
 	ms.sessions[testSessionID] = status.Status{
 		SessionID:   testSessionID,

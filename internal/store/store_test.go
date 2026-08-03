@@ -223,20 +223,3 @@ func TestSave_ConcurrentWritesProduceValidJSON(t *testing.T) {
 	}
 	_ = got
 }
-
-func TestWriteAtomic_NoLeftoverTempFiles(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.json")
-	if err := writeAtomic(path, []byte(`{"a":1}`), 0o600); err != nil {
-		t.Fatalf("writeAtomic: %v", err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	for _, e := range entries {
-		if e.Name() != "x.json" {
-			t.Fatalf("unexpected leftover file %q in %s", e.Name(), dir)
-		}
-	}
-}

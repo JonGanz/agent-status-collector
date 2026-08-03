@@ -20,6 +20,13 @@ const (
 )
 
 // Status is the single unified shape every provider adapter must produce.
+//
+// Rate limits are deliberately not a field here: they're an account-level
+// concept (e.g. Claude's 5h/7d usage windows apply to the whole account,
+// not one session), even though a provider adapter may only be able to
+// observe them via a specific session's integration (e.g. Claude Code's
+// statusline). See internal/ratelimit for the aggregate store and the
+// `agent-status rate-limits` command.
 type Status struct {
 	SchemaVersion int              `json:"schema_version"`
 	SessionID     string           `json:"session_id"`
@@ -29,7 +36,6 @@ type Status struct {
 	TaskSummary   string           `json:"task_summary,omitempty"`
 	Context       *ContextUsage    `json:"context,omitempty"`
 	Cost          *CostInfo        `json:"cost,omitempty"`
-	RateLimit     *RateLimitInfo   `json:"rate_limit,omitempty"`
 	Multiplexer   *MultiplexerInfo `json:"multiplexer,omitempty"`
 	StartedAt     time.Time        `json:"started_at"`
 	LastUpdated   time.Time        `json:"last_updated"`
@@ -49,10 +55,9 @@ type CostInfo struct {
 	Currency   string  `json:"currency,omitempty"`
 }
 
-type RateLimitInfo struct {
-	Windows []RateLimitWindow `json:"windows,omitempty"`
-}
-
+// RateLimitWindow describes usage against one account-level rate limit
+// window (e.g. Claude's "5h" or "7d" windows). See internal/ratelimit,
+// which persists these independently of any session.
 type RateLimitWindow struct {
 	Label       string     `json:"label"`
 	PercentUsed float64    `json:"percent_used"`

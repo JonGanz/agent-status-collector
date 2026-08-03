@@ -9,6 +9,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/JonGanz/agent-status-collector/internal/config"
+	"github.com/JonGanz/agent-status-collector/internal/ratelimit"
 	"github.com/JonGanz/agent-status-collector/internal/store"
 	"github.com/JonGanz/agent-status-collector/internal/xdg"
 
@@ -63,6 +64,20 @@ func eventLogPath() string {
 // newStore builds the Store used by all commands.
 func newStore() *store.Store {
 	return store.New(sessionsDir())
+}
+
+// rateLimitsDir resolves the account-level rate limit snapshot directory,
+// honoring --state-dir.
+func rateLimitsDir() string {
+	if flagStateDir != "" {
+		return filepath.Join(flagStateDir, "rate-limits")
+	}
+	return filepath.Join(xdg.StateDir(), "rate-limits")
+}
+
+// newRateLimitStore builds the rate limit Store used by all commands.
+func newRateLimitStore() *ratelimit.Store {
+	return ratelimit.New(rateLimitsDir())
 }
 
 // debugEnabled reports whether debug logging should be active for this

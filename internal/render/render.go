@@ -70,15 +70,6 @@ func Show(w io.Writer, e store.Entry) error {
 	if st.Cost != nil {
 		fmt.Fprintf(tw, "Cost:\t%.4f %s\n", st.Cost.SessionUSD, orDefault(st.Cost.Currency, "USD"))
 	}
-	if st.RateLimit != nil {
-		for _, win := range st.RateLimit.Windows {
-			line := fmt.Sprintf("%.1f%%", win.PercentUsed)
-			if win.ResetsAt != nil {
-				line += fmt.Sprintf(" (resets %s)", win.ResetsAt.Format(time.RFC3339))
-			}
-			fmt.Fprintf(tw, "Rate limit (%s):\t%s\n", win.Label, line)
-		}
-	}
 	if st.Multiplexer != nil && st.Multiplexer.Type != "" {
 		fmt.Fprintf(tw, "Multiplexer:\t%s session=%s window=%s pane=%s\n",
 			st.Multiplexer.Type, st.Multiplexer.Session, st.Multiplexer.Window, st.Multiplexer.Pane)

@@ -54,6 +54,9 @@ var hookCmd = &cobra.Command{
 		if sa, ok := p.(provider.StoreAware); ok {
 			sa.SetStore(s)
 		}
+		if rla, ok := p.(provider.RateLimitStoreAware); ok {
+			rla.SetRateLimitStore(newRateLimitStore())
+		}
 
 		st, err := p.HandleHook(cmd.Context(), hookEvent, bytes.NewReader(raw))
 		if err != nil {

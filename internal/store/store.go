@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JonGanz/agent-status-collector/internal/clock"
+	"github.com/JonGanz/agent-status-collector/internal/fsutil"
 	"github.com/JonGanz/agent-status-collector/internal/procutil"
 	"github.com/JonGanz/agent-status-collector/internal/status"
 )
@@ -87,7 +88,7 @@ func (s *Store) Save(st status.Status) error {
 	}
 	path := s.sessionPath(st.SessionID)
 	return withLock(s.lockPath(st.SessionID), func() error {
-		return writeAtomic(path, data, filePerm)
+		return fsutil.WriteAtomic(path, data, filePerm)
 	})
 }
 

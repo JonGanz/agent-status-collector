@@ -26,11 +26,12 @@ var requiredHookEvents = []string{
 	"Notification", "Stop", "SubagentStop", "PreCompact", "SessionEnd",
 }
 
-// Provider implements provider.Provider and provider.StoreAware for
-// Claude Code.
+// Provider implements provider.Provider, provider.StoreAware, and
+// provider.RateLimitStoreAware for Claude Code.
 type Provider struct {
-	store provider.SessionStore
-	now   func() time.Time
+	store      provider.SessionStore
+	rateLimits provider.RateLimitStore
+	now        func() time.Time
 }
 
 // New constructs a Claude Code provider. Call SetStore before HandleHook.
@@ -46,6 +47,9 @@ func (p *Provider) Name() string { return providerName }
 
 // SetStore implements provider.StoreAware.
 func (p *Provider) SetStore(s provider.SessionStore) { p.store = s }
+
+// SetRateLimitStore implements provider.RateLimitStoreAware.
+func (p *Provider) SetRateLimitStore(s provider.RateLimitStore) { p.rateLimits = s }
 
 func (p *Provider) Detect() (installed bool, detail string) {
 	if path, err := exec.LookPath("claude"); err == nil {

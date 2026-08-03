@@ -9,8 +9,10 @@ import (
 )
 
 // handleStatusLine merges a Claude Code statusline payload into the stored
-// Status for its session_id. Statusline payloads never carry lifecycle
-// state; only Context/Cost/RateLimit/model fields are updated.
+// Status for its session_id (Context/Cost/model), and separately persists
+// rate limits to the account-level rate limit store, since those windows
+// apply to the whole Claude account, not this one session. Statusline
+// payloads never carry lifecycle state.
 func (p *Provider) handleStatusLine(raw []byte) (status.Status, error) {
 	var sp statusLinePayload
 	if err := json.Unmarshal(raw, &sp); err != nil {
@@ -36,17 +38,6 @@ func (p *Provider) handleStatusLine(raw []byte) (status.Status, error) {
 	}
 	st.Cost = &status.CostInfo{SessionUSD: sp.Cost.TotalCostUSD, Currency: "USD"}
 
-	var windows []status.RateLimitWindow
-	if w := toRateLimitWindow("5h", sp.RateLimits.FiveHour); w != nil {
-		windows = append(windows, *w)
-	}
-	if w := toRateLimitWindow("7d", sp.RateLimits.SevenDay); w != nil {
-		windows = append(windows, *w)
-	}
-	if len(windows) > 0 {
-		st.RateLimit = &status.RateLimitInfo{Windows: windows}
-	}
-
 	if sp.Model.DisplayName != "" {
 		st.Extra["model"] = sp.Model.DisplayName
 	}
@@ -54,6 +45,22 @@ func (p *Provider) handleStatusLine(raw []byte) (status.Status, error) {
 	if err := p.store.Save(st); err != nil {
 		return status.Status{}, err
 	}
+
+	if p.rateLimits != nil {
+		var windows []status.RateLimitWindow
+		if w := toRateLimitWindow("5h", sp.RateLimits.FiveHour); w != nil {
+			windows = append(windows, *w)
+		}
+		if w := toRateLimitWindow("7d", sp.RateLimits.SevenDay); w != nil {
+			windows = append(windows, *w)
+		}
+		if len(windows) > 0 {
+			if err := p.rateLimits.SaveRateLimits(providerName, windows, p.now()); err != nil {
+				return status.Status{}, err
+			}
+		}
+	}
+
 	return st, nil
 }
 
