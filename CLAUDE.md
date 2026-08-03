@@ -4,7 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A local-only Go CLI (`agent-status`) that tracks the status of AI coding agents (Claude Code, and other providers as adapters are added) running on the developer's machine, exposing a single unified status format regardless of provider. See `GOAL.md` for the original problem statement/design philosophy and `README.md` for user-facing usage.
+Multi-agent AI-assisted development often runs several coding agents in parallel (multiple instances of the same agent, or a mix of Claude Code/Copilot/etc), each with its own way of surfacing status, context usage, and rate limits — making them hard to track together. `agent-status` is a single local CLI entrypoint that queries the status of every locally-running agent, session-level and aggregate (e.g. rate limits), in one unified format regardless of provider. See `README.md` for user-facing usage.
+
+### Design constraints (non-negotiable, not just current behavior)
+
+- **UNIX philosophy** — this tool does one thing (report agent status) well; it is not a dashboard, daemon, or notification system.
+- **Local only, always** — no data is ever pulled from or pushed to a remote service. If a future change would phone home for any reason, that's out of scope for this project, not a config option to add.
+- **No runtime dependencies** — the shipped binary needs nothing installed beyond itself (no Node/npm, no Python, etc). Shelling out to already-ubiquitous CLI tools (`jq`, `tmux`) is fine and already done (`providers/claudecode/setup.go`'s installed statusline script, `internal/mux/tmux.go`) — the constraint is about the *distributed* artifact, not build-time Go module deps.
+- **XDG-compliant storage, always** — any new local storage or config path must go through `internal/xdg` (or `--state-dir`/`--config-dir` overrides), never a hardcoded `~/.foo`. This also means the on-disk format is a stable-ish contract: prefer additive changes to `status.Status`/`ratelimit.Record` and bump `status.CurrentSchemaVersion` for breaking ones, rather than silently reshaping what's already on disk.
+- **Single, unified return value** — every provider adapter produces the same `status.Status` shape (see below); callers of `list`/`show` never need provider-specific branching.
+- **Provider setup must be either automated-and-safe or explicit-and-manual** — `provider.Provider.Setup` returning `SetupResult{Changed: false, Instructions: "..."}` (manual-only path) is a legitimate, expected outcome for a provider that can't be safely automated, not a stopgap to eventually remove.
 
 ## Commands
 
@@ -31,7 +40,7 @@ There is no lint config beyond `go vet`/`gofmt`. No Node/other runtime is involv
 
 `internal/status.Status` is the one shape every adapter produces (state enum: `active`/`done`/`blocked`/`stopped`/`unknown`, plus context/cost/multiplexer/task-summary fields, and an `Extra map[string]any` escape hatch for provider-specific data that shouldn't require a core schema change). `done` means the turn finished and nothing is pending; `blocked` specifically means the agent needs a decision from you (e.g. a permission request) — keeping these distinct is the point, so don't collapse them back together.
 
-Each hook/statusline call only carries a partial view. Adapters own their own load-merge-save cycle against their injected `SessionStore` — the core does not merge hook payloads itself. After an adapter returns a `Status`, `cmd/hook.go` stamps `Multiplexer` info (via `internal/mux`, tmux/screen detection) and re-saves, since multiplexer context is a core-owned, provider-agnostic concern.
+Each hook/statusline call only carries a partial view. Adapters own their own load-merge-save cycle against their injected `SessionStore` — the core does not merge hook payloads itself. After an adapter returns a `Status`, `cmd/hook.go` stamps `Multiplexer` info (via `internal/mux`, tmux/screen detection) and re-saves, since multiplexer context is a core-owned, provider-agnostic concern. `internal/mux/tmux.go` always targets `tmux display-message -t "$TMUX_PANE"` (never a bare `-p` with no target) — without it, tmux resolves "current" to whatever pane the attached *client* currently has focused, not the pane this process is actually running in, so a session's stored pane/window would silently get overwritten with the wrong ids the moment the user looked at a different window. This was a real, previously-shipped bug (external consumers like tmux-asc-binder inherited the wrong window/pane); don't remove the explicit `-t`.
 
 **Rate limits are deliberately not on `Status`.** They're account-level (e.g. Claude's 5h/7d windows apply to the whole account, not one session) even though an adapter may only be able to observe them via one session's integration. They're persisted separately by `internal/ratelimit` (one flat file per provider, keyed by provider name, not session id) and surfaced via `agent-status rate-limits`, so a caller never needs to find "a session that happened to report it." `status.RateLimitWindow` is the shared value type between the two.
 
@@ -51,6 +60,10 @@ Sessions: one JSON file per session under `<state-dir>/sessions/<session-id>.jso
 Rate limits: one JSON file per provider under `<state-dir>/rate-limits/<provider>.json` (`internal/ratelimit.Store`) — no session id involved at all, since these snapshots are account-level.
 
 Both stores (plus `providers/claudecode/setup.go`'s settings.json/skill/statusline-script writes) share `internal/fsutil.WriteAtomic` (temp file in the same directory + rename) so nothing ever leaves a torn/partial file behind — don't reintroduce a package-local copy of this when adding a new storage location.
+
+### Debug logging (`internal/eventlog/`)
+
+`--debug` (one-shot flag) or a persisted `{"debug": true}` in `$XDG_CONFIG_HOME/agent-status-collector/config.json` (`internal/config`, since a hook fired in the background by Claude Code never gets an interactive flag) makes `cmd/hook.go` append every raw hook/statusline payload it receives to `<state-dir>/logs/events.jsonl` via `eventlog.Append` — one JSON line per invocation (timestamp, provider, event, raw payload), with a basic size-based rotation guard. This exists specifically to debug "the tool lost track of an agent" — when that happens, diff what the log actually received against what `HandleHook` did with it, rather than guessing. `debugEnabled()` (`cmd/root.go`) resolves the flag/config precedence; `--debug` always wins.
 
 ### Testability conventions
 

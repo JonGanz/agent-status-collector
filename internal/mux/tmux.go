@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -16,8 +17,23 @@ func queryTmux() Info {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return info
 	}
-	out, err := exec.Command("tmux", "display-message", "-p",
-		"#{session_name}\t#{window_index}\t#{pane_index}\t#{session_id}\t#{window_id}\t#{pane_id}").Output()
+
+	// Without an explicit -t, `tmux display-message` resolves "current" to
+	// the attached client's currently-focused pane, NOT the pane this
+	// process is actually running in -- so as soon as the user looks at a
+	// different window, the next query for an unrelated pane's hook/
+	// statusline invocation would misreport that focused window/pane
+	// instead of its own. $TMUX_PANE is set by tmux on every pane's shell
+	// (and inherited by child processes, e.g. Claude Code's hook/statusline
+	// subprocess) and always identifies the actual originating pane
+	// regardless of focus, so target it explicitly when available.
+	args := []string{"display-message", "-p"}
+	if paneID := os.Getenv("TMUX_PANE"); paneID != "" {
+		args = append(args, "-t", paneID)
+	}
+	args = append(args, "#{session_name}\t#{window_index}\t#{pane_index}\t#{session_id}\t#{window_id}\t#{pane_id}")
+
+	out, err := exec.Command("tmux", args...).Output()
 	if err != nil {
 		return info
 	}

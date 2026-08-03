@@ -54,10 +54,9 @@ func (p *Provider) IsConfigured() (bool, error) {
 	return true, nil
 }
 
-// Setup implements provider.Provider. See package doc / GOAL.md: this
-// mutates the user's global ~/.claude/settings.json, so every real write is
-// preceded by a timestamped backup, and dryRun performs zero filesystem
-// writes.
+// Setup implements provider.Provider. This mutates the user's global
+// ~/.claude/settings.json, so every real write is preceded by a timestamped
+// backup, and dryRun performs zero filesystem writes.
 func (p *Provider) Setup(dryRun bool) (provider.SetupResult, error) {
 	sp, err := settingsPath()
 	if err != nil {
