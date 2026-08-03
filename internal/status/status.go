@@ -12,11 +12,20 @@ const CurrentSchemaVersion = 1
 type State string
 
 const (
-	StateActive          State = "active"
-	StateIdle            State = "idle"
-	StateWaitingForInput State = "waiting_for_input"
-	StateStopped         State = "stopped"
-	StateUnknown         State = "unknown"
+	// StateActive means the agent is actively working (a tool call is in
+	// flight, a prompt was just submitted, etc).
+	StateActive State = "active"
+	// StateDone means the agent finished its current turn and needs
+	// nothing from you — it's just waiting for your next prompt whenever
+	// you're ready. This is distinct from StateBlocked: nothing is
+	// pending on your end.
+	StateDone State = "done"
+	// StateBlocked means the agent cannot proceed without a decision from
+	// you (e.g. a tool permission request). This is the state worth
+	// actively surfacing/alerting on.
+	StateBlocked State = "blocked"
+	StateStopped State = "stopped"
+	StateUnknown State = "unknown"
 )
 
 // Status is the single unified shape every provider adapter must produce.

@@ -56,7 +56,7 @@ func TestShow_IncludesDetail(t *testing.T) {
 		Status: status.Status{
 			SessionID:   "sess-1",
 			Provider:    "claudecode",
-			State:       status.StateWaitingForInput,
+			State:       status.StateBlocked,
 			PID:         &pid,
 			TaskSummary: "Refactoring foo",
 			StartedAt:   time.Now(),
@@ -67,7 +67,7 @@ func TestShow_IncludesDetail(t *testing.T) {
 		t.Fatalf("Show: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"sess-1", "claudecode", "waiting_for_input", "4242", "Refactoring foo"} {
+	for _, want := range []string{"sess-1", "claudecode", "blocked", "4242", "Refactoring foo"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Show() output missing %q:\n%s", want, out)
 		}

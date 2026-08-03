@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/JonGanz/agent-status-collector/internal/provider"
@@ -128,14 +129,26 @@ func (p *Provider) handleLifecycleHook(event string, raw []byte) (status.Status,
 			st.Extra["last_tool"] = hp.ToolName
 		}
 	case "Notification":
-		st.State = status.StateWaitingForInput
+		// Claude Code fires Notification for two very different reasons,
+		// distinguishable only by the free-text message (there's no
+		// structured flag): a genuine permission request (StateBlocked —
+		// something only you can decide), or an idle reminder ~60s after
+		// Stop already completed the turn (not actually blocked on
+		// anything — just still StateDone). This heuristic is inherently
+		// a little fragile since Claude Code doesn't document the message
+		// wording as a stable API, but it's the only signal available.
+		if isPermissionRequest(hp.Message) {
+			st.State = status.StateBlocked
+		} else {
+			st.State = status.StateDone
+		}
 		if hp.Message != "" {
 			st.Extra["notification_message"] = hp.Message
 		}
 	case "SubagentStop":
 		// A subagent (Task-tool invocation) finished, not the main turn; no state change.
 	case "Stop":
-		st.State = status.StateIdle
+		st.State = status.StateDone
 	case "PreCompact":
 		st.Extra["last_compact_at"] = p.now().Format(time.RFC3339)
 	case "SessionEnd":
@@ -192,4 +205,12 @@ func summarize(prompt string) string {
 		return string(runes[:maxLen-1]) + "…"
 	}
 	return s
+}
+
+// isPermissionRequest reports whether a Notification message looks like a
+// tool-permission request rather than an idle-waiting reminder. Best-effort
+// substring match on undocumented message text — see the Notification case
+// in handleLifecycleHook for why this is the only signal available.
+func isPermissionRequest(message string) bool {
+	return strings.Contains(strings.ToLower(message), "permission")
 }

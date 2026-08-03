@@ -86,8 +86,9 @@ func TestHandleHook_StateTransitions(t *testing.T) {
 		{"hooks/user_prompt_submit.json", "UserPromptSubmit", status.StateActive},
 		{"hooks/pre_tool_use.json", "PreToolUse", status.StateActive},
 		{"hooks/post_tool_use.json", "PostToolUse", status.StateActive},
-		{"hooks/notification.json", "Notification", status.StateWaitingForInput},
-		{"hooks/stop.json", "Stop", status.StateIdle},
+		{"hooks/notification.json", "Notification", status.StateDone},
+		{"hooks/notification_permission.json", "Notification", status.StateBlocked},
+		{"hooks/stop.json", "Stop", status.StateDone},
 		{"hooks/pre_compact.json", "PreCompact", status.StateActive}, // no-op if already active
 		{"hooks/session_end.json", "SessionEnd", status.StateStopped},
 	}
@@ -188,6 +189,40 @@ func TestHandleHook_Notification_RecordsMessage(t *testing.T) {
 	}
 	if st.Extra["notification_message"] != "Claude is waiting for your input" {
 		t.Fatalf("Extra[notification_message] = %v", st.Extra["notification_message"])
+	}
+	if st.State != status.StateDone {
+		t.Fatalf("State = %q, want done (idle nudge, not a permission request)", st.State)
+	}
+}
+
+func TestHandleHook_Notification_PermissionRequest_SetsBlocked(t *testing.T) {
+	p, ms, _ := newTestProvider(t)
+	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateActive}
+
+	payload := testutil.LoadFixture(t, "hooks/notification_permission.json")
+	st, err := p.HandleHook(context.Background(), "Notification", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("HandleHook: %v", err)
+	}
+	if st.State != status.StateBlocked {
+		t.Fatalf("State = %q, want blocked (permission request)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_AlwaysConcludesTurnEvenAfterBlocked(t *testing.T) {
+	// Once the user resolves a permission request, Claude Code always
+	// fires Stop when the turn concludes, so Stop should unconditionally
+	// move a Blocked session to Done.
+	p, ms, _ := newTestProvider(t)
+	ms.sessions[testSessionID] = status.Status{SessionID: testSessionID, Provider: providerName, State: status.StateBlocked}
+
+	payload := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("HandleHook: %v", err)
+	}
+	if st.State != status.StateDone {
+		t.Fatalf("State = %q, want done (Stop always means the turn concluded)", st.State)
 	}
 }
 
