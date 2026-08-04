@@ -16,6 +16,12 @@ go build -o agent-status .
 
 Put the resulting `agent-status` binary somewhere on your `$PATH` (e.g. `~/.local/bin`).
 
+Or install directly via Go tooling:
+
+```sh
+go install github.com/JonGanz/agent-status-collector@latest
+```
+
 Run the test suite:
 
 ```sh

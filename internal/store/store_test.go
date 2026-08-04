@@ -101,6 +101,25 @@ func TestIsStale_TTLFallbackWhenNoPID(t *testing.T) {
 	}
 }
 
+func TestIsStale_PIDReuseBackstop(t *testing.T) {
+	// Regression test: a killed session's PID can get recycled by the OS
+	// onto an unrelated live process. isRunning(pid) would then report
+	// true forever, so IsStale must not trust it as sole authority — once
+	// LastUpdated is older than maxPIDTrustAge, it's stale regardless of
+	// what isRunning says.
+	reused := 12345
+	s, fc := newTestStore(t, WithIsRunning(func(pid int) bool { return pid == reused }), WithMaxPIDTrustAge(1*time.Hour))
+	st := status.Status{SessionID: "ghost", PID: &reused, State: status.StateActive, LastUpdated: fc.Now()}
+
+	if s.IsStale(st) {
+		t.Fatalf("freshly updated session with live PID reported stale")
+	}
+	fc.Advance(2 * time.Hour)
+	if !s.IsStale(st) {
+		t.Fatalf("session with live-but-stale PID past maxPIDTrustAge not reported stale")
+	}
+}
+
 func TestIsStale_StoppedAlwaysStale(t *testing.T) {
 	s, fc := newTestStore(t)
 	st := status.Status{SessionID: "done", State: status.StateStopped, LastUpdated: fc.Now()}

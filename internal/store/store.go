@@ -18,18 +18,20 @@ import (
 
 // Default staleness tuning. See IsStale for how these are applied.
 const (
-	DefaultNoUpdateTTL  = 15 * time.Minute
-	DefaultStoppedGrace = 5 * time.Minute
-	filePerm            = 0o600
+	DefaultNoUpdateTTL    = 15 * time.Minute
+	DefaultStoppedGrace   = 5 * time.Minute
+	DefaultMaxPIDTrustAge = 24 * time.Hour
+	filePerm              = 0o600
 )
 
 // Store persists Status records as one JSON file per session under Dir.
 type Store struct {
-	dir          string
-	clock        clock.Clock
-	isRunning    func(pid int) bool
-	noUpdateTTL  time.Duration
-	stoppedGrace time.Duration
+	dir            string
+	clock          clock.Clock
+	isRunning      func(pid int) bool
+	noUpdateTTL    time.Duration
+	stoppedGrace   time.Duration
+	maxPIDTrustAge time.Duration
 }
 
 // Option configures a Store.
@@ -49,15 +51,22 @@ func WithNoUpdateTTL(d time.Duration) Option { return func(s *Store) { s.noUpdat
 // via List with includeStale) before Prune removes it.
 func WithStoppedGrace(d time.Duration) Option { return func(s *Store) { s.stoppedGrace = d } }
 
+// WithMaxPIDTrustAge overrides how long a PID reported as "running" is
+// trusted without any session update before staleness falls back to the
+// LastUpdated TTL anyway (guards against OS PID reuse masking a dead
+// session forever).
+func WithMaxPIDTrustAge(d time.Duration) Option { return func(s *Store) { s.maxPIDTrustAge = d } }
+
 // New creates a Store rooted at dir (the "sessions" directory itself, not
 // its parent). The directory is created lazily on first write.
 func New(dir string, opts ...Option) *Store {
 	s := &Store{
-		dir:          dir,
-		clock:        clock.Real{},
-		isRunning:    procutil.IsRunning,
-		noUpdateTTL:  DefaultNoUpdateTTL,
-		stoppedGrace: DefaultStoppedGrace,
+		dir:            dir,
+		clock:          clock.Real{},
+		isRunning:      procutil.IsRunning,
+		noUpdateTTL:    DefaultNoUpdateTTL,
+		stoppedGrace:   DefaultStoppedGrace,
+		maxPIDTrustAge: DefaultMaxPIDTrustAge,
 	}
 	for _, o := range opts {
 		o(s)
@@ -170,15 +179,21 @@ func (s *Store) Delete(id string) error {
 // Rules (checked in order):
 //  1. State == StateStopped: always stale, but see Prune for the grace
 //     period before deletion.
-//  2. PID known: stale iff the process no longer exists (highest-confidence
-//     signal).
+//  2. PID known: stale if the process no longer exists (highest-confidence
+//     signal). If it does exist, it's still stale once LastUpdated is
+//     older than maxPIDTrustAge — the OS can recycle a PID onto an
+//     unrelated process, so a dead-but-reused PID must not be trusted as
+//     "alive" forever.
 //  3. PID unknown: stale iff LastUpdated is older than noUpdateTTL.
 func (s *Store) IsStale(st status.Status) bool {
 	if st.State == status.StateStopped {
 		return true
 	}
 	if st.PID != nil {
-		return !s.isRunning(*st.PID)
+		if !s.isRunning(*st.PID) {
+			return true
+		}
+		return s.clock.Now().Sub(st.LastUpdated) > s.maxPIDTrustAge
 	}
 	return s.clock.Now().Sub(st.LastUpdated) > s.noUpdateTTL
 }
