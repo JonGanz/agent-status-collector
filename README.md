@@ -10,23 +10,45 @@ A single local CLI for checking the status of multiple AI coding agents (Claude 
 
 Requires Go 1.25+.
 
-```sh
-go build -o agent-status .
-```
-
-Put the resulting `agent-status` binary somewhere on your `$PATH` (e.g. `~/.local/bin`).
-
-Or install directly via Go tooling:
+### Step 1 — build the binary
 
 ```sh
-go install github.com/JonGanz/agent-status-collector@latest
+./install.sh
 ```
+
+This runs `go build -o ~/.local/bin/agent-status .` — make sure `~/.local/bin` is on your `$PATH` (check with `echo $PATH`; if it's missing, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile).
+
+Alternatives, if you'd rather not use `~/.local/bin`:
+
+```sh
+go build -o agent-status .                              # build into the current directory instead
+go install github.com/JonGanz/agent-status-collector@latest   # build via Go tooling into $GOBIN/$GOPATH/bin
+```
+
+`@latest` resolves to the HEAD of the default branch unless/until this repo starts tagging releases — pin a commit (`@<sha>`) if you need reproducibility.
 
 Run the test suite:
 
 ```sh
 go test ./...
 ```
+
+### Step 2 — wire up an agent integration
+
+The binary alone only gives you a local CLI over whatever session data already exists on disk. To actually get Claude Code reporting into it, run:
+
+```sh
+agent-status providers                    # see what's installed/configured
+agent-status setup claudecode --dry-run   # preview changes, no writes — run this first
+agent-status setup claudecode              # apply
+```
+
+`setup claudecode` edits `~/.claude/settings.json` to add hooks, a statusline command, and installs a `report-status` skill file. It's safe to re-run:
+- It always backs up the existing file first, to `~/.claude/settings.json.bak-<timestamp>`.
+- Existing hooks/statusline commands are preserved (appended alongside, or wrapped), never overwritten.
+- It's idempotent — configuration is only considered complete once hooks, statusline, and the skill file are *all* present, so re-running after a partial/interrupted apply just fills in what's missing.
+
+This is not a daemon or background service — there's nothing to enable at boot or keep running. `agent-status` is invoked on-demand by the hooks/statusline it installs, and by you directly.
 
 ## Usage
 
@@ -38,16 +60,6 @@ agent-status list --all        # include stale/stopped sessions
 agent-status list --json       # machine-readable output
 agent-status show <session-id>
 ```
-
-### Set up an agent integration
-
-```sh
-agent-status providers                # see what's installed/configured
-agent-status setup claudecode --dry-run   # preview changes, no writes
-agent-status setup claudecode             # apply (backs up ~/.claude/settings.json first)
-```
-
-This wires up Claude Code's hooks and statusline to report into agent-status-collector, and installs a `report-status` skill so Claude Code can self-report what it's working on. Existing hooks/statusline commands are preserved (appended alongside, or wrapped), never overwritten.
 
 ### Rate limits
 
