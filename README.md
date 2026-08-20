@@ -6,6 +6,10 @@ A single local CLI for checking the status of multiple AI coding agents (Claude 
 - One unified output format across providers.
 - Provider adapters are pluggable; v1 ships a Claude Code adapter.
 
+## Disclaimer
+
+This repository's contents — code, tests, and documentation — are 100% LLM-produced.
+
 ## Build / Install
 
 Requires Go 1.25+.
