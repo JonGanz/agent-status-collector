@@ -183,8 +183,13 @@ func (s *Store) Delete(id string) error {
 //     signal). If it does exist, it's still stale once LastUpdated is
 //     older than maxPIDTrustAge — the OS can recycle a PID onto an
 //     unrelated process, so a dead-but-reused PID must not be trusted as
-//     "alive" forever.
+//     "alive" forever. StateBlocked is exempt from this time check: sitting
+//     idle waiting on the user is the expected, correct behavior of that
+//     state, not evidence of death, so only the liveness check applies.
 //  3. PID unknown: stale iff LastUpdated is older than noUpdateTTL.
+//     StateBlocked instead uses maxPIDTrustAge, since a session waiting
+//     indefinitely on the user can easily outlive the short default TTL
+//     with zero new hook traffic.
 func (s *Store) IsStale(st status.Status) bool {
 	if st.State == status.StateStopped {
 		return true
@@ -193,9 +198,16 @@ func (s *Store) IsStale(st status.Status) bool {
 		if !s.isRunning(*st.PID) {
 			return true
 		}
+		if st.State == status.StateBlocked {
+			return false
+		}
 		return s.clock.Now().Sub(st.LastUpdated) > s.maxPIDTrustAge
 	}
-	return s.clock.Now().Sub(st.LastUpdated) > s.noUpdateTTL
+	ttl := s.noUpdateTTL
+	if st.State == status.StateBlocked {
+		ttl = s.maxPIDTrustAge
+	}
+	return s.clock.Now().Sub(st.LastUpdated) > ttl
 }
 
 // ShouldDelete reports whether a stale entry has passed its grace period and

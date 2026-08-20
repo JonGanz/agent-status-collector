@@ -1,0 +1,8 @@
+{
+  "session_id": "a1b2c3d4-0000-4444-8888-abcdef123456",
+  "transcript_path": "/home/dev/.claude/projects/-home-dev-myproj/a1b2c3d4-0000-4444-8888-abcdef123456.jsonl",
+  "cwd": "/home/dev/myproj",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "ExitPlanMode",
+  "tool_input": { "plan": "1. Do the thing\n2. Do the other thing" }
+}

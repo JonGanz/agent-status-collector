@@ -120,6 +120,51 @@ func TestIsStale_PIDReuseBackstop(t *testing.T) {
 	}
 }
 
+func TestIsStale_BlockedExemptFromMaxPIDTrustAge(t *testing.T) {
+	// Regression test: a blocked session (waiting on the user for a
+	// decision) is expected to sit idle indefinitely with a live PID and no
+	// new updates — that must not be treated as evidence of death the way
+	// it would be for any other state.
+	running := 12345
+	s, fc := newTestStore(t, WithIsRunning(func(pid int) bool { return pid == running }), WithMaxPIDTrustAge(1*time.Hour))
+	st := status.Status{SessionID: "blocked", PID: &running, State: status.StateBlocked, LastUpdated: fc.Now()}
+
+	fc.Advance(2 * time.Hour)
+	if s.IsStale(st) {
+		t.Fatalf("blocked session with live PID past maxPIDTrustAge reported stale")
+	}
+}
+
+func TestIsStale_BlockedDeadPIDStillStale(t *testing.T) {
+	// The blocked-state exemption only waives the time-based check; a
+	// confirmed-dead process must still be reported stale (crash detection
+	// can't be disabled just because the last known state was "blocked").
+	deadPID := 99999
+	s, fc := newTestStore(t)
+	st := status.Status{SessionID: "blocked-dead", PID: &deadPID, State: status.StateBlocked, LastUpdated: fc.Now()}
+
+	if !s.IsStale(st) {
+		t.Fatalf("blocked session with dead PID not reported stale")
+	}
+}
+
+func TestIsStale_BlockedNoPIDUsesLongerTTL(t *testing.T) {
+	// Without a PID to check, a blocked session should use the longer
+	// maxPIDTrustAge window instead of the short noUpdateTTL — 15 minutes
+	// of silence is completely normal while waiting on the user.
+	s, fc := newTestStore(t, WithNoUpdateTTL(10*time.Minute), WithMaxPIDTrustAge(1*time.Hour))
+	st := status.Status{SessionID: "blocked-no-pid", State: status.StateBlocked, LastUpdated: fc.Now()}
+
+	fc.Advance(20 * time.Minute)
+	if s.IsStale(st) {
+		t.Fatalf("blocked PID-less session past noUpdateTTL (but within maxPIDTrustAge) reported stale")
+	}
+	fc.Advance(1 * time.Hour)
+	if !s.IsStale(st) {
+		t.Fatalf("blocked PID-less session past maxPIDTrustAge not reported stale")
+	}
+}
+
 func TestIsStale_StoppedAlwaysStale(t *testing.T) {
 	s, fc := newTestStore(t)
 	st := status.Status{SessionID: "done", State: status.StateStopped, LastUpdated: fc.Now()}

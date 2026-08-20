@@ -226,6 +226,153 @@ func TestHandleHook_Stop_AlwaysConcludesTurnEvenAfterBlocked(t *testing.T) {
 	}
 }
 
+func TestHandleHook_Stop_KeepsBlockedAfterExitPlanMode(t *testing.T) {
+	// Presenting a plan is normally the last thing that happens in a turn -
+	// Stop fires right after, well before the user has approved or rejected
+	// it, so Stop must not downgrade this to Done the way it would for a
+	// genuinely-concluded turn.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_exit_plan_mode.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateBlocked {
+		t.Fatalf("State = %q, want blocked (plan awaiting approval)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_ResolvesDoneAfterPlanApprovedAndToolRuns(t *testing.T) {
+	// Once the user approves the plan, Claude Code resumes with real tool
+	// calls; the next PreToolUse for a different tool should clear the
+	// awaiting-approval flag so a later Stop concludes the turn normally.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_exit_plan_mode.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse ExitPlanMode): %v", err)
+	}
+
+	nextTool := testutil.LoadFixture(t, "hooks/pre_tool_use.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(nextTool)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse Bash): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateDone {
+		t.Fatalf("State = %q, want done (plan was approved, real work resumed)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_ResolvesDoneAfterPlanFeedback(t *testing.T) {
+	// If the user replies with feedback instead of approving, the next
+	// UserPromptSubmit should clear the awaiting-approval flag too.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_exit_plan_mode.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse ExitPlanMode): %v", err)
+	}
+
+	prompt := testutil.LoadFixture(t, "hooks/user_prompt_submit.json")
+	if _, err := p.HandleHook(context.Background(), "UserPromptSubmit", bytes.NewReader(prompt)); err != nil {
+		t.Fatalf("HandleHook(UserPromptSubmit): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateDone {
+		t.Fatalf("State = %q, want done (plan feedback given, awaiting flag cleared)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_StaysActiveWhileSubagentStillRunning(t *testing.T) {
+	// A subagent launched to run in the background can still be working
+	// after the parent turn's own Stop fires - that isn't the parent being
+	// done, since the subagent's own completion (SubagentStop) hasn't
+	// happened yet.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_task.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse Task): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateActive {
+		t.Fatalf("State = %q, want active (subagent still in flight)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_ResolvesDoneAfterSubagentCompletes(t *testing.T) {
+	// Once the subagent's own SubagentStop fires, the pending count clears
+	// and a later Stop can conclude the turn normally.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_task.json")
+	if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+		t.Fatalf("HandleHook(PreToolUse Task): %v", err)
+	}
+
+	subagentStop := testutil.LoadFixture(t, "hooks/subagent_stop.json")
+	if _, err := p.HandleHook(context.Background(), "SubagentStop", bytes.NewReader(subagentStop)); err != nil {
+		t.Fatalf("HandleHook(SubagentStop): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateDone {
+		t.Fatalf("State = %q, want done (subagent finished before Stop)", st.State)
+	}
+}
+
+func TestHandleHook_Stop_StaysActiveWithMultipleSubagentsUntilAllComplete(t *testing.T) {
+	// Two subagents launched, only one reports SubagentStop before Stop:
+	// the parent must not be marked done while the other is still running.
+	p, _, _ := newTestProvider(t)
+
+	preToolUse := testutil.LoadFixture(t, "hooks/pre_tool_use_task.json")
+	for i := 0; i < 2; i++ {
+		if _, err := p.HandleHook(context.Background(), "PreToolUse", bytes.NewReader(preToolUse)); err != nil {
+			t.Fatalf("HandleHook(PreToolUse Task #%d): %v", i, err)
+		}
+	}
+
+	subagentStop := testutil.LoadFixture(t, "hooks/subagent_stop.json")
+	if _, err := p.HandleHook(context.Background(), "SubagentStop", bytes.NewReader(subagentStop)); err != nil {
+		t.Fatalf("HandleHook(SubagentStop): %v", err)
+	}
+
+	stop := testutil.LoadFixture(t, "hooks/stop.json")
+	st, err := p.HandleHook(context.Background(), "Stop", bytes.NewReader(stop))
+	if err != nil {
+		t.Fatalf("HandleHook(Stop): %v", err)
+	}
+	if st.State != status.StateActive {
+		t.Fatalf("State = %q, want active (one of two subagents still in flight)", st.State)
+	}
+}
+
 func TestHandleHook_MissingSessionID_Errors(t *testing.T) {
 	p, _, _ := newTestProvider(t)
 	_, err := p.HandleHook(context.Background(), "SessionStart", bytes.NewReader([]byte(`{"hook_event_name":"SessionStart"}`)))

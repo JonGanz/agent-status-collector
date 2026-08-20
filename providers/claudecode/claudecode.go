@@ -123,10 +123,24 @@ func (p *Provider) handleLifecycleHook(event string, raw []byte) (status.Status,
 		if hp.Prompt != "" {
 			st.TaskSummary = summarize(hp.Prompt)
 		}
+		delete(st.Extra, "awaiting_plan_approval")
 	case "PreToolUse", "PostToolUse":
 		st.State = status.StateActive
 		if hp.ToolName != "" {
 			st.Extra["last_tool"] = hp.ToolName
+		}
+		if hp.ToolName == "ExitPlanMode" {
+			st.Extra["awaiting_plan_approval"] = true
+		} else {
+			delete(st.Extra, "awaiting_plan_approval")
+		}
+		if event == "PreToolUse" && hp.ToolName == "Task" {
+			// A subagent is being launched. Its own SubagentStop hook fires
+			// whenever it truly finishes, which for a background-run
+			// subagent can be well after this turn's Stop, so track it as
+			// still in flight until then rather than letting Stop declare
+			// the parent done just because its own turn ended.
+			st.Extra["pending_subagents"] = pendingSubagents(st) + 1
 		}
 	case "Notification":
 		// Claude Code fires Notification for two very different reasons,
@@ -146,9 +160,35 @@ func (p *Provider) handleLifecycleHook(event string, raw []byte) (status.Status,
 			st.Extra["notification_message"] = hp.Message
 		}
 	case "SubagentStop":
-		// A subagent (Task-tool invocation) finished, not the main turn; no state change.
+		// The subagent that just finished never directly sets State (its
+		// own completion isn't the parent turn concluding) - but it may be
+		// the last one Stop was waiting on, so clear it from the pending
+		// count.
+		if n := pendingSubagents(st) - 1; n > 0 {
+			st.Extra["pending_subagents"] = n
+		} else {
+			delete(st.Extra, "pending_subagents")
+		}
 	case "Stop":
-		st.State = status.StateDone
+		// Normally Stop means the turn genuinely concluded (a permission
+		// prompt, if any, already got resolved before Stop fires - see
+		// TestHandleHook_Stop_AlwaysConcludesTurnEvenAfterBlocked). ExitPlanMode
+		// doesn't fit that: presenting a plan IS the end of the turn, and
+		// only the user's next action (approve or give feedback) resumes
+		// anything, so Stop must not downgrade an awaiting-approval plan to
+		// StateDone. Likewise, a subagent launched to run in the background
+		// can still be working well after this turn's Stop fires - that
+		// isn't the parent being done either, since its own completion
+		// hasn't been reported yet.
+		awaitingPlan, _ := st.Extra["awaiting_plan_approval"].(bool)
+		switch {
+		case awaitingPlan:
+			st.State = status.StateBlocked
+		case pendingSubagents(st) > 0:
+			st.State = status.StateActive
+		default:
+			st.State = status.StateDone
+		}
 	case "PreCompact":
 		st.Extra["last_compact_at"] = p.now().Format(time.RFC3339)
 	case "SessionEnd":
@@ -186,6 +226,20 @@ func ensureMap(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// pendingSubagents reads the "pending_subagents" counter out of st.Extra.
+// It's stored as an int when set in-process, but round-trips through the
+// JSON-backed store as a float64, so both are handled.
+func pendingSubagents(st status.Status) int {
+	switch n := st.Extra["pending_subagents"].(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // summarize truncates a raw user prompt into a short fallback task summary,
